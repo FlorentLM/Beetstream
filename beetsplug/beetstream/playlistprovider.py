@@ -20,6 +20,8 @@ class PlaylistProvider:
         app.logger.debug(f"Loaded {len(self._playlists)} playlists")
 
     def _load_playlists(self):
+        if not self.dir:
+            return
         paths = glob.glob(os.path.join(self.dir, "**.m3u8"))
         paths += glob.glob(os.path.join(self.dir, "**.m3u"))
         paths.sort()
