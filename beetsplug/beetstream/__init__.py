@@ -80,7 +80,10 @@ class BeetstreamPlugin(BeetsPlugin):
             app.config['never_transcode'] = self.config['never_transcode']
             playlist_dir = self.config['playlist_dir']
             if not playlist_dir:
-                playlist_dir = config['smartplaylist']['playlist_dir'].get()
+                try:
+                    playlist_dir = config['smartplaylist']['playlist_dir'].get()
+                except:
+                    pass
             app.config['playlist_dir'] = playlist_dir
 
             # Enable CORS if required.

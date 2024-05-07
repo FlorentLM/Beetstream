@@ -49,5 +49,8 @@ def _song(id):
     return map_song(g.lib.get_item(int(id)))
 
 def playlist_provider():
-    _playlist_provider._dir = app.config['playlist_dir']
+    if 'playlist_dir' in app.config:
+        _playlist_provider.dir = app.config['playlist_dir']
+    if not _playlist_provider.dir:
+        app.logger.warning('No playlist_dir configured')
     return _playlist_provider
