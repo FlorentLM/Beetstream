@@ -287,22 +287,19 @@ def map_playlist(playlist):
 
 # === Core response-formatting functions ===
 
-import xml.etree.ElementTree as ET
-
 
 def dict_to_xml(tag: str, data):
     """
     Converts a json-like dict to an XML tree where every key/value pair
-    with a simple value is mapped as an attribute. If adding the attribute
-    would create a duplicate (i.e. the key is already used), a new element
-    with that tag is created instead.
+    with a simple value is mapped as an attribute.... unless if adding the attribute
+    would create a duplicate, in which case a new element with that tag is created instead
     """
     elem = ET.Element(tag)
 
     if isinstance(data, dict):
         for key, val in data.items():
             if not isinstance(val, (dict, list)):
-                # If the attribute already exists, create a child element.
+                # If the attribute already exists, create a child element
                 if key in elem.attrib:
                     child = ET.Element(key)
                     child.text = str(val)
@@ -311,7 +308,7 @@ def dict_to_xml(tag: str, data):
                     elem.set(key, str(val))
             elif isinstance(val, list):
                 for item in val:
-                    # For each item in the list, process depending on type.
+                    # For each item in the list, process depending on type
                     if not isinstance(item, (dict, list)):
                         if key in elem.attrib:
                             child = ET.Element(key)
@@ -327,7 +324,7 @@ def dict_to_xml(tag: str, data):
                 elem.append(child)
 
     elif isinstance(data, list):
-        # When the data is a list, each item becomes a new child.
+        # when data is a list, each item becomes a new child
         for item in data:
             if not isinstance(item, (dict, list)):
                 if tag in elem.attrib:
