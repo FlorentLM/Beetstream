@@ -116,7 +116,7 @@ def map_album(album_object: Union[dict, library.Album], with_songs=True) -> dict
         # 'starred': timestamp_to_iso(album.get('last_liked_album', 0)),
         'userRating': album.get('stars_rating_album', 0),
 
-        'recordLabels': [{'name': l for l in stringlist_splitter(album.get('label', ''))}],
+        # 'recordLabels': [{'name': l for l in stringlist_splitter(album.get('label', ''))}],
         'isCompilation': bool(album.get('comp', False)),
 
         # These are only needed when part of a directory response
@@ -224,12 +224,12 @@ def map_song(song_object):
     }
     subsonic_song.update(song_specific)
 
-    # subsonic_song['replayGain'] = {
-    #         'trackGain': (song.get('rg_track_gain') or 0) or ((song.get('r128_track_gain') or 107) - 107),
-    #         'albumGain': (song.get('rg_album_gain') or 0) or ((song.get('r128_album_gain') or 107) - 107),
-    #         'trackPeak': song.get('rg_track_peak', 0),
-    #         'albumPeak': song.get('rg_album_peak', 0)
-    # }
+    subsonic_song['replayGain'] = {
+            'trackGain': (song.get('rg_track_gain') or 0) or ((song.get('r128_track_gain') or 107) - 107),
+            'albumGain': (song.get('rg_album_gain') or 0) or ((song.get('r128_album_gain') or 107) - 107),
+            'trackPeak': song.get('rg_track_peak', 0),
+            'albumPeak': song.get('rg_album_peak', 0)
+    }
 
     # Add remaining filetype-related elements with fallbacks
     subsonic_song['suffix'] = song.get('format').lower() or subsonic_song['path'].rsplit('.', 1)[-1].lower()
@@ -252,17 +252,17 @@ def map_artist(artist_name, with_albums=True):
         # 'artistImageUrl': "https://t4.ftcdn.net/jpg/00/64/67/63/360_F_64676383_LdbmhiNM6Ypzb3FM4PPuFP9rHe7ri8Ju.jpg",
         "userRating": 0,
 
-        # "roles": [
-        #     "artist",
-        #     "albumartist",
-        #     "composer"
-        # ],
+        "roles": [
+            "artist",
+            "albumartist",
+            "composer"
+        ],
 
         # This is only needed when part of a Child response
         'mediaType': 'artist'
     }
 
-    albums = list(g.lib.albums(f'albumartist:{artist_name}'))
+    albums = list(flask.g.lib.albums(f'albumartist:{artist_name}'))
     subsonic_artist['albumCount'] = len(albums)
     if albums:
         subsonic_artist['musicBrainzId'] = albums[0].get('mb_albumartistid', '')
@@ -287,39 +287,61 @@ def map_playlist(playlist):
 
 # === Core response-formatting functions ===
 
-def dict_to_xml(tag: str, data, list_item=False):
-    """
-    Converts a json-like dict to an XML tree
+import xml.etree.ElementTree as ET
 
-    When a dict is part of a list (list_item=True), simple key/value pairs are
-    set as attributes. More complex values (dicts or lists) become child elements.
+
+def dict_to_xml(tag: str, data):
+    """
+    Converts a json-like dict to an XML tree where every key/value pair
+    with a simple value is mapped as an attribute. If adding the attribute
+    would create a duplicate (i.e. the key is already used), a new element
+    with that tag is created instead.
     """
     elem = ET.Element(tag)
+
     if isinstance(data, dict):
         for key, val in data.items():
             if not isinstance(val, (dict, list)):
-                if list_item:
-                    # Set simple key/value pairs as attributes
-                    elem.set(key, str(val))
-                else:
+                # If the attribute already exists, create a child element.
+                if key in elem.attrib:
                     child = ET.Element(key)
                     child.text = str(val)
                     elem.append(child)
+                else:
+                    elem.set(key, str(val))
             elif isinstance(val, list):
                 for item in val:
-                    # Each item in the list is processed with list_item=True
-                    child = dict_to_xml(key, item, list_item=True)
-                    elem.append(child)
+                    # For each item in the list, process depending on type.
+                    if not isinstance(item, (dict, list)):
+                        if key in elem.attrib:
+                            child = ET.Element(key)
+                            child.text = str(item)
+                            elem.append(child)
+                        else:
+                            elem.set(key, str(item))
+                    else:
+                        child = dict_to_xml(key, item)
+                        elem.append(child)
             elif isinstance(val, dict):
-                # For nested dicts, we typically want to preserve the structure.
-                child = dict_to_xml(key, val, list_item=False)
+                child = dict_to_xml(key, val)
                 elem.append(child)
+
     elif isinstance(data, list):
+        # When the data is a list, each item becomes a new child.
         for item in data:
-            child = dict_to_xml(tag, item, list_item=True)
-            elem.append(child)
+            if not isinstance(item, (dict, list)):
+                if tag in elem.attrib:
+                    child = ET.Element(tag)
+                    child.text = str(item)
+                    elem.append(child)
+                else:
+                    elem.set(tag, str(item))
+            else:
+                child = dict_to_xml(tag, item)
+                elem.append(child)
     else:
         elem.text = str(data)
+
     return elem
 
 
