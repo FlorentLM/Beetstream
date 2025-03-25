@@ -58,7 +58,7 @@ def send_album_art(album_id, size=None):
         if size:
             cover = resize_image(art_path, size)
             return flask.send_file(cover, mimetype='image/jpeg')
-        return flask.send_file(art_path, mimetype=path_to_mimetype(art_path))
+        return flask.send_file(art_path, mimetype=get_mimetype(art_path))
 
     mbid = album.get('mb_albumid')
     if mbid:
@@ -85,14 +85,14 @@ def get_cover_art():
 
     # album requests
     if req_id.startswith(ALB_ID_PREF):
-        album_id = int(album_subid_to_beetid(req_id))
+        album_id = sub_to_beets_album(req_id)
         response = send_album_art(album_id, size)
         if response is not None:
             return response
 
     # song requests
     elif req_id.startswith(SNG_ID_PREF):
-        item_id = int(song_subid_to_beetid(req_id))
+        item_id = sub_to_beets_song(req_id)
         item = flask.g.lib.get_item(item_id)
         album_id = item.get('album_id')
         if album_id:
@@ -110,8 +110,13 @@ def get_cover_art():
 
     # artist requests
     elif req_id.startswith(ART_ID_PREF):
-        # TODO
-        pass
+        img = Image.open('./artist.png')
+        if size:
+            img.thumbnail((size, size))
+        buf = BytesIO()
+        img.save(buf, format='JPEG')
+        buf.seek(0)
+        return flask.send_file(buf, mimetype='image/jpeg')
 
     # Fallback: return empty XML document on error
     return subsonic_response({}, 'xml', failed=True)

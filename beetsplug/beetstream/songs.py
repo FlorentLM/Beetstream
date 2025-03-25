@@ -3,9 +3,9 @@ from beetsplug.beetstream import app, stream
 import flask
 
 
-def song_payload(song_id: str) -> dict:
-    song_id = int(song_subid_to_beetid(song_id))
-    song_item = flask.g.lib.get_item(song_id)
+def song_payload(subsonic_song_id: str) -> dict:
+    beets_song_id = sub_to_beets_song(subsonic_song_id)
+    song_item = flask.g.lib.get_item(beets_song_id)
 
     payload = {
         'song': map_song(song_item)
@@ -18,8 +18,8 @@ def song_payload(song_id: str) -> dict:
 def get_song():
     r = flask.request.values
     song_id = r.get('id')
-    payload = song_payload(song_id)
 
+    payload = song_payload(song_id)
     return subsonic_response(payload, r.get('f', 'xml'))
 
 @app.route('/rest/getSongsByGenre', methods=["GET", "POST"])
@@ -75,37 +75,36 @@ def get_random_songs():
 def stream_song():
     r = flask.request.values
 
-    maxBitrate = int(r.get('maxBitRate') or 0)
-    format = r.get('format')
+    max_bitrate = int(r.get('maxBitRate') or 0)
+    req_format = r.get('format')
 
-    song_id = int(song_subid_to_beetid(r.get('id')))
+    song_id = sub_to_beets_song(r.get('id'))
     item = flask.g.lib.get_item(song_id)
 
-    item_path = item.get('path', b'').decode('utf-8')
+    item_path = item.get('path', b'').decode('utf-8') if item else ''
     if not item_path:
         flask.abort(404)
 
-    if app.config['never_transcode'] or format == 'raw' or maxBitrate <= 0 or item.bitrate <= maxBitrate * 1000:
+    if app.config['never_transcode'] or req_format == 'raw' or max_bitrate <= 0 or item.bitrate <= max_bitrate * 1000:
         return stream.direct(item_path)
     else:
-        return stream.try_transcode(item_path, maxBitrate)
+        return stream.try_transcode(item_path, max_bitrate)
 
 @app.route('/rest/download', methods=["GET", "POST"])
 @app.route('/rest/download.view', methods=["GET", "POST"])
 def download_song():
     r = flask.request.values
 
-    song_id = int(song_subid_to_beetid(r.get('id')))
+    song_id = sub_to_beets_song(r.get('id'))
     item = flask.g.lib.get_item(song_id)
 
     return stream.direct(item.path.decode('utf-8'))
 
 
-# TODO link with Last.fm or ListenBrainz
 @app.route('/rest/getTopSongs', methods=["GET", "POST"])
 @app.route('/rest/getTopSongs.view', methods=["GET", "POST"])
 def get_top_songs():
-    # TODO
+    # TODO - Use the play_count, and/or link with Last.fm or ListenBrainz
 
     r = flask.request.values
 

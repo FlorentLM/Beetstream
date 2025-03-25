@@ -23,7 +23,6 @@ from beets import ui
 import flask
 from flask import g
 from flask_cors import CORS
-from pathlib import Path
 
 # Flask setup
 app = flask.Flask(__name__)
@@ -62,6 +61,19 @@ class BeetstreamPlugin(BeetsPlugin):
             'playlist_dir': '',
         })
 
+    item_types = {
+        # We use the same fields as the MPDStats plugin for interoperability
+        'play_count': types.INTEGER,
+        'last_played': DateType(),
+        'last_liked': DateType(),
+        'stars_rating': types.INTEGER    # ... except this one, it's a different rating system from MPDStats' "rating"
+    }
+
+    # album_types = {
+    #     'last_liked_album': DateType(),
+    #     'stars_rating_album': types.INTEGER
+    # }
+
     def commands(self):
         cmd = ui.Subcommand('beetstream', help='run Beetstream server, exposing SubSonic API')
         cmd.parser.add_option('-d', '--debug', action='store_true', default=False, help='debug mode')
@@ -72,6 +84,13 @@ class BeetstreamPlugin(BeetsPlugin):
                 self.config['host'] = args.pop(0)
             if args:
                 self.config['port'] = int(args.pop(0))
+
+            app.config['root_directory'] = Path(config['directory'].get())
+
+            # Total number of items in the Beets database (only used to detect deletions in getIndexes endpoint)
+            # We initialise to +inf at Beetstream start, so the real count is set the first time a client queries
+            # the getIndexes endpoint
+            app.config['nb_items'] = float('inf')
 
             app.config['lib'] = lib
             app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
