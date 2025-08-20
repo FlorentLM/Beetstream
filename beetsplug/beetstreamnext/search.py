@@ -1,19 +1,15 @@
-from beetsplug.beetstream.utils import *
-from beetsplug.beetstream import app
+from beetsplug.beetstreamnext.utils import *
+from beetsplug.beetstreamnext import app
 from functools import partial
 
 
 @app.route('/rest/search2', methods=["GET", "POST"])
 @app.route('/rest/search2.view', methods=["GET", "POST"])
-def search2():
-    return _search(ver=2)
 
 @app.route('/rest/search3', methods=["GET", "POST"])
 @app.route('/rest/search3.view', methods=["GET", "POST"])
-def search3():
-    return _search(ver=3)
 
-def _search(ver=None):
+def search(ver=None):
     r = flask.request.values
 
     song_count = int(r.get('songCount', 20))
@@ -31,7 +27,7 @@ def _search(ver=None):
     if not query:
         if ver == 2:
             # search2 does not support empty queries: return an empty response
-            return subsonic_response({}, r.get('f', 'xml'), failed=True)
+            return subsonic_error(10, r.get('f', 'xml'))
 
         # search3 "must support an empty query and return all the data"
         # https://opensubsonic.netlify.app/docs/endpoints/search3/
@@ -57,7 +53,12 @@ def _search(ver=None):
     # TODO - do the sort in the SQL query instead?
     artists.sort(key=lambda name: strip_accents(name).upper())
 
-    tag = f'searchResult{ver if ver else ""}'
+    if flask.request.path.rsplit('.', 1)[0][6:] == 'search2':
+        tag = 'searchResult2'
+    elif flask.request.path.rsplit('.', 1)[0][6:] == 'search3':
+        tag = 'searchResult3'
+    else:
+        tag = 'searchResult'
     payload = {
         tag: {
             'artist': list(map(partial(map_artist, with_albums=False), artists)),  # no need to include albums twice

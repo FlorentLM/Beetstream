@@ -1,8 +1,8 @@
-from beetsplug.beetstream.utils import *
-from beetsplug.beetstream import app
-from beetsplug.beetstream.artists import artist_payload
-from beetsplug.beetstream.albums import album_payload
-from beetsplug.beetstream.songs import song_payload
+from beetsplug.beetstreamnext.utils import *
+from beetsplug.beetstreamnext import app
+from beetsplug.beetstreamnext.artists import artist_payload
+from beetsplug.beetstreamnext.albums import album_payload
+from beetsplug.beetstreamnext.songs import song_payload
 import flask
 
 
@@ -20,6 +20,22 @@ def musicdirectory_payload(subsonic_musicdirectory_id: str, with_artists=True) -
         }
     }
     return payload
+
+
+@app.route('/rest/getOpenSubsonicExtensions', methods=["GET", "POST"])
+@app.route('/rest/getOpenSubsonicExtensions.view', methods=["GET", "POST"])
+def get_open_subsonic_extensions():
+    r = flask.request.values
+
+    payload = {
+        'openSubsonicExtensions': [
+            {
+                'name': 'transcodeOffset',
+                'versions': [1]
+            },
+        ]
+    }
+    return subsonic_response(payload, r.get('f', 'xml'))
 
 
 @app.route('/rest/getGenres', methods=["GET", "POST"])

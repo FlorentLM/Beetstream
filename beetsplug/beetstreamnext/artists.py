@@ -1,6 +1,7 @@
-from beetsplug.beetstream.utils import *
-from beetsplug.beetstream import app
+from beetsplug.beetstreamnext.utils import *
+from beetsplug.beetstreamnext import app
 import time
+import urllib.parse
 from collections import defaultdict
 from functools import partial
 import flask
@@ -27,15 +28,10 @@ def artist_payload(subsonic_artist_id: str, with_albums=True) -> dict:
 
 @app.route('/rest/getArtists', methods=["GET", "POST"])
 @app.route('/rest/getArtists.view', methods=["GET", "POST"])
-def get_artists():
-    return _artists('artists')
 
 @app.route('/rest/getIndexes', methods=["GET", "POST"])
 @app.route('/rest/getIndexes.view', methods=["GET", "POST"])
-def get_indexes():
-    return _artists('indexes')
-
-def _artists(version: str):
+def get_artists_or_indexes():
     r = flask.request.values
 
     modified_since = r.get('ifModifiedSince', '')
@@ -47,8 +43,9 @@ def _artists(version: str):
     for artist in artists:
         alphanum_dict[strip_accents(artist[0]).upper()].append(artist)
 
+    tag = 'indexes' if flask.request.path.rsplit('.', 1)[0].endswith('Indexes') else 'artists'
     payload = {
-        version: {
+        tag: {
             'ignoredArticles': '',      # TODO - include config from 'the' plugin??
             'index': [
                 {'name': char, 'artist': list(map(map_artist, artists))}
@@ -57,8 +54,7 @@ def _artists(version: str):
         }
     }
 
-    if version == 'indexes':
-
+    if tag == 'indexes':
         with flask.g.lib.transaction() as tx:
             latest = int(tx.query('SELECT added FROM items ORDER BY added DESC LIMIT 1')[0][0])
             # TODO - 'mtime' field?
@@ -66,11 +62,11 @@ def _artists(version: str):
 
         if nb_items < app.config['nb_items']:
             app.logger.warning('Media deletion detected (or very first time getIndexes is queried)')
-            # Deletion of items (or very first check since Beetstream started)
+            # Deletion of items (or very first check since BeetstreamNext started)
             latest = int(time.time() * 1000)
             app.config['nb_items'] = nb_items
 
-        payload[version]['lastModified'] = latest
+        payload[tag]['lastModified'] = latest
 
     return subsonic_response(payload, r.get('f', 'xml'))
 
@@ -84,24 +80,42 @@ def get_artist():
 
     return subsonic_response(payload, r.get('f', 'xml'))
 
+@app.route('/rest/getArtistInfo', methods=["GET", "POST"])
+@app.route('/rest/getArtistInfo.view', methods=["GET", "POST"])
+
 @app.route('/rest/getArtistInfo2', methods=["GET", "POST"])
 @app.route('/rest/getArtistInfo2.view', methods=["GET", "POST"])
 def artistInfo2():
-    # TODO
 
     r = flask.request.values
 
     artist_name = sub_to_beets_artist(r.get('id'))
+    first_item = flask.g.lib.items(f'albumartist:{artist_name}')[0]
+    artist_mbid = first_item.get('mb_albumartistid', '')
 
+    if app.config['lastfm_api_key']:
+        data_lastfm = query_lastfm(artist_mbid, 'artist')
+        bio = data_lastfm.get('artist', {}).get('bio', {}).get('content', '')
+        short_bio = trim_text(bio, char_limit=300)
+    else:
+        short_bio = f'wow. much artist. very {artist_name}'
+
+    tag = 'artistInfo2' if flask.request.path.rsplit('.', 1)[0].endswith('2') else 'artistInfo'
     payload = {
-        "artistInfo2": {
-            "biography": f"wow. much artist. very {artist_name}",
-            "musicBrainzId": "",
-            "lastFmUrl": "",
-            "smallImageUrl": "",
-            "mediumImageUrl": "",
-            "largeImageUrl": ""
+        tag: {
+            'biography': short_bio,
+            'musicBrainzId': artist_mbid,
+            'lastFmUrl': f"https://www.last.fm/music/{urllib.parse.quote_plus(artist_name.replace(' ', '+'))}",
         }
     }
+
+    if app.config['fetch_artists_images']:
+        # TODO - this is not fetching the actual images, maybe we keep it as always on?
+        dz_query = urllib.parse.quote_plus(artist_name.replace(' ', '-'))
+        dz_data = query_deezer(dz_query, 'artist')
+        if dz_data:
+            payload[tag]['smallImageUrl'] = dz_data.get('picture_medium', ''),
+            payload[tag]['mediumImageUrl'] = dz_data.get('picture_big', ''),
+            payload[tag]['largeImageUrl'] = dz_data.get('picture_xl', '')
 
     return subsonic_response(payload, r.get('f', 'xml'))

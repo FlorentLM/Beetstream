@@ -16,12 +16,15 @@ import shutil
 import importlib
 from functools import partial
 import requests
+import urllib.parse
+from beetsplug.beetstreamnext import app
+
 
 
 API_VERSION = '1.16.1'
-BEETSTREAM_VERSION = '1.4.5'
+BEETSTREAMNEXT_VERSION = '1.4.5'
 
-# Prefixes for Beetstream's internal IDs
+# Prefixes for BeetstreamNext's internal IDs
 ART_ID_PREF = 'ar-'
 ALB_ID_PREF = 'al-'
 SNG_ID_PREF = 'sg-'
@@ -37,18 +40,18 @@ elif FFMPEG_BIN:
     import subprocess
 
 
-# === Beetstream internal IDs makers/readers ===
+# === BeetstreamNext internal IDs makers/readers ===
 # These IDs are sent to the client once (when it accesses endpoints such as getArtists or getAlbumList
 # and the client will then use these to access a specific item via endpoints that need an ID
 
 def beets_to_sub_artist(beet_artist_name):
     base64_name = base64.urlsafe_b64encode(str(beet_artist_name).encode('utf-8'))
-    return f"{ART_ID_PREF}{base64_name.rstrip(b"=").decode('utf-8')}"
+    return f"{ART_ID_PREF}{base64_name.rstrip(b'=').decode('utf-8')}"
 
 def sub_to_beets_artist(subsonic_artist_id):
     subsonic_artist_id = str(subsonic_artist_id)[len(ART_ID_PREF):]
     padding = 4 - (len(subsonic_artist_id) % 4)
-    return base64.urlsafe_b64decode(subsonic_artist_id + ("=" * padding)).decode('utf-8')
+    return base64.urlsafe_b64decode(subsonic_artist_id + ('=' * padding)).decode('utf-8')
 
 def beets_to_sub_album(beet_album_id):
     return f'{ALB_ID_PREF}{beet_album_id}'
@@ -84,9 +87,9 @@ def map_media(beets_object: Union[dict, library.LibModel]):
         'genres': [{'name': g} for g in genres_formatter(beets_object.get('genre', ''))],
         'created': timestamp_to_iso(beets_object.get('added')) or datetime.now().isoformat(),   # default to now?
         'originalReleaseDate': {
-            'year': beets_object.get('original_year', 0),
-            'month': beets_object.get('original_month', 0),
-            'day': beets_object.get('original_day', 0)
+            'year': beets_object.get('original_year', 0) or beets_object.get('year', 0),
+            'month': beets_object.get('original_month', 0) or beets_object.get('month', 0),
+            'day': beets_object.get('original_day', 0) or beets_object.get('day', 0)
         },
         'releaseDate': {
             'year': beets_object.get('year', 0),
@@ -195,7 +198,7 @@ def map_song(song_object):
         'path': song_filepath if os.path.isfile(song_filepath) else '',
 
         'played': timestamp_to_iso(song.get('last_played', 0)),
-        'starred': timestamp_to_iso(song.get('last_liked', 0)),
+        # 'starred': timestamp_to_iso(song.get('last_liked', 0)),
         'playCount': song.get('play_count', 0),
         'userRating': song.get('stars_rating', 0),
 
@@ -224,12 +227,12 @@ def map_song(song_object):
     }
     subsonic_song.update(song_specific)
 
-    subsonic_song['replayGain'] = {
-            'trackGain': (song.get('rg_track_gain') or 0) or ((song.get('r128_track_gain') or 107) - 107),
-            'albumGain': (song.get('rg_album_gain') or 0) or ((song.get('r128_album_gain') or 107) - 107),
-            'trackPeak': song.get('rg_track_peak', 0),
-            'albumPeak': song.get('rg_album_peak', 0)
-    }
+    # subsonic_song['replayGain'] = {
+    #         'trackGain': (song.get('rg_track_gain') or 0) or ((song.get('r128_track_gain') or 107) - 107),
+    #         'albumGain': (song.get('rg_album_gain') or 0) or ((song.get('r128_album_gain') or 107) - 107),
+    #         'trackPeak': song.get('rg_track_peak', 0),
+    #         'albumPeak': song.get('rg_album_peak', 0)
+    # }
 
     # Add remaining filetype-related elements with fallbacks
     subsonic_song['suffix'] = song.get('format').lower() or subsonic_song['path'].rsplit('.', 1)[-1].lower()
@@ -240,49 +243,56 @@ def map_song(song_object):
 
 
 def map_artist(artist_name, with_albums=True):
-    subsonid_artist_id = beets_to_sub_artist(artist_name)
+    subsonic_artist_id = beets_to_sub_artist(artist_name)
 
     subsonic_artist = {
-        'id': subsonid_artist_id,
+        'id': subsonic_artist_id,
         'name': artist_name,
         'sortName': artist_name,
         'title': artist_name,
         # "starred": "2021-07-03T06:15:28.757Z", # nothing if not starred
-        'coverArt': subsonid_artist_id,
-        # 'artistImageUrl': "https://t4.ftcdn.net/jpg/00/64/67/63/360_F_64676383_LdbmhiNM6Ypzb3FM4PPuFP9rHe7ri8Ju.jpg",
+        'coverArt': subsonic_artist_id,
         "userRating": 0,
 
-        "roles": [
-            "artist",
-            "albumartist",
-            "composer"
-        ],
+        # "roles": [
+        #     "artist",
+        #     "albumartist",
+        #     "composer"
+        # ],
 
         # This is only needed when part of a Child response
         'mediaType': 'artist'
     }
+
+    # dz_data = query_deezer(artist_name, 'artist')
+    # if dz_data:
+    #     subsonic_artist['artistImageUrl'] = dz_data.get('picture_big', '')
 
     albums = list(flask.g.lib.albums(f'albumartist:{artist_name}'))
     subsonic_artist['albumCount'] = len(albums)
     if albums:
         subsonic_artist['musicBrainzId'] = albums[0].get('mb_albumartistid', '')
 
-    if with_albums:
-        subsonic_artist['album'] = list(map(partial(map_album, with_songs=False), albums))
+        if with_albums:
+            subsonic_artist['album'] = list(map(partial(map_album, with_songs=False), albums))
 
     return subsonic_artist
 
+
 def map_playlist(playlist):
-    return {
+    subsonic_playlist = {
         'id': playlist.id,
         'name': playlist.name,
         'songCount': len(playlist.songs),
         'duration': playlist.duration,
         'created': timestamp_to_iso(playlist.ctime),
         'changed': timestamp_to_iso(playlist.mtime),
+        'entry': playlist.songs
+
         # 'owner': 'userA',     # TODO
         # 'public': True,
     }
+    return subsonic_playlist
 
 
 # === Core response-formatting functions ===
@@ -302,20 +312,20 @@ def dict_to_xml(tag: str, data):
                 # If the attribute already exists, create a child element
                 if key in elem.attrib:
                     child = ET.Element(key)
-                    child.text = str(val)
+                    child.text = str(val).lower() if isinstance(val, bool) else str(val)
                     elem.append(child)
                 else:
-                    elem.set(key, str(val))
+                    elem.set(key, str(val).lower() if isinstance(val, bool) else str(val))
             elif isinstance(val, list):
                 for item in val:
                     # For each item in the list, process depending on type
                     if not isinstance(item, (dict, list)):
                         if key in elem.attrib:
                             child = ET.Element(key)
-                            child.text = str(item)
+                            child.text = str(item).lower() if isinstance(item, bool) else str(item)
                             elem.append(child)
                         else:
-                            elem.set(key, str(item))
+                            elem.set(key, str(item).lower() if isinstance(item, bool) else str(item))
                     else:
                         child = dict_to_xml(key, item)
                         elem.append(child)
@@ -329,15 +339,15 @@ def dict_to_xml(tag: str, data):
             if not isinstance(item, (dict, list)):
                 if tag in elem.attrib:
                     child = ET.Element(tag)
-                    child.text = str(item)
+                    child.text = str(item).lower() if isinstance(item, bool) else str(item)
                     elem.append(child)
                 else:
-                    elem.set(tag, str(item))
+                    elem.set(tag, str(item).lower() if isinstance(item, bool) else str(item))
             else:
                 child = dict_to_xml(tag, item)
                 elem.append(child)
     else:
-        elem.text = str(data)
+        elem.text = str(data).lower() if isinstance(data, bool) else str(data)
 
     return elem
 
@@ -350,17 +360,17 @@ def jsonpify(format: str, data: dict):
         return flask.jsonify(data)
 
 
-def subsonic_response(data: dict = {}, resp_fmt: str = 'xml', failed=False):
+def subsonic_response(data: dict = {}, resp_fmt: str = 'xml'):
     """ Wrap any json-like dict with the subsonic response elements
      and output the appropriate 'format' (json or xml) """
 
     if resp_fmt.startswith('json'):
         wrapped = {
             'subsonic-response': {
-                'status': 'failed' if failed else 'ok',
+                'status': 'ok',
                 'version': API_VERSION,
-                'type': 'Beetstream',
-                'serverVersion': BEETSTREAM_VERSION,
+                'type': 'BeetstreamNext',
+                'serverVersion': BEETSTREAMNEXT_VERSION,
                 'openSubsonic': True,
                 **data
             }
@@ -370,9 +380,9 @@ def subsonic_response(data: dict = {}, resp_fmt: str = 'xml', failed=False):
     else:
         root = dict_to_xml("subsonic-response", data)
         root.set("xmlns", "http://subsonic.org/restapi")
-        root.set("status", 'failed' if failed else 'ok')
+        root.set("status", 'ok')
         root.set("version", API_VERSION)
-        root.set("type", 'Beetstream')
+        root.set("type", 'BeetstreamNext')
         root.set("serverVersion", BEETSTREAM_VERSION)
         root.set("openSubsonic", 'true')
 
@@ -383,7 +393,62 @@ def subsonic_response(data: dict = {}, resp_fmt: str = 'xml', failed=False):
         return flask.Response(xml_str, mimetype="text/xml")
 
 
+def subsonic_error(code: int = 0, message: str = '', resp_fmt: str = 'xml'):
+
+    subsonic_errors = {
+        0: 'A generic error.',
+        10: 'Required parameter is missing.',
+        20: 'Incompatible Subsonic REST protocol version. Client must upgrade.',
+        30: 'Incompatible Subsonic REST protocol version. Server must upgrade.',
+        40: 'Wrong username or password.',
+        41: 'Token authentication not supported.',
+        42: 'Provided authentication mechanism not supported.',
+        43: 'Multiple conflicting authentication mechanisms provided.',
+        44: 'Invalid API key.',
+        50: 'User is not authorized for the given operation.',
+        # 60: 'The trial period for the Subsonic server is over.',
+        70: 'The requested data was not found.'
+    }
+
+    err_payload = {
+        'error': {
+            'code': code,
+            'message': message if message else subsonic_errors[code],
+            # 'helpUrl': ''
+        }
+    }
+
+    if resp_fmt.startswith('json'):
+        wrapped = {
+            'subsonic-response': {
+                'status': 'failed',
+                'version': API_VERSION,
+                'type': 'BeetstreamNext',
+                'serverVersion': BEETSTREAMNEXT_VERSION,
+                'openSubsonic': True,
+                **err_payload
+            }
+        }
+        return jsonpify(resp_fmt, wrapped)
+
+    else:
+        root = dict_to_xml("subsonic-response", err_payload)
+        root.set("xmlns", "http://subsonic.org/restapi")
+        root.set("status", 'failed')
+        root.set("version", API_VERSION)
+        root.set("type", 'BeetstreamNext')
+        root.set("serverVersion", BEETSTREAMNEXT_VERSION)
+        root.set("openSubsonic", 'true')
+
+        xml_bytes = ET.tostring(root, encoding='UTF-8', method='xml', xml_declaration=True)
+        pretty_xml = minidom.parseString(xml_bytes).toprettyxml(encoding='UTF-8')
+        xml_str = pretty_xml.decode('UTF-8')
+
+        return flask.Response(xml_str, mimetype="text/xml")
+
+
 # === Various other utility functions ===
+
 
 def strip_accents(s):
     return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
@@ -461,13 +526,66 @@ def creation_date(filepath):
                 return stat.st_mtime
 
 
-def query_musicbrainz(mbid:str, type: str):
+def query_musicbrainz(mbid: str, type: str):
 
     types_mb = {'track': 'recording', 'album': 'release', 'artist': 'artist'}
     endpoint = f'https://musicbrainz.org/ws/2/{types_mb[type]}/{mbid}'
 
-    headers = {'User-Agent': 'Beetstream/1.4.5 ( https://github.com/FlorentLM/Beetstream )'}
+    headers = {'User-Agent': f'BeetstreamNext/{BEETSTREAMNEXT_VERSION} ( https://github.com/FlorentLM/BeetstreamNext )'}
     params = {'fmt': 'json'}
 
+    if types_mb[type] == 'artist':
+        params['inc'] = 'annotation'
+
     response = requests.get(endpoint, headers=headers, params=params)
-    return response.json()
+    return response.json() if response.ok else {}
+
+
+def query_deezer(query: str, type: str):
+
+    query_urlsafe = urllib.parse.quote_plus(query.replace(' ', '-'))
+    endpoint = f'https://api.deezer.com/{type}/{query_urlsafe}'
+
+    headers = {'User-Agent': f'BeetstreamNext/{BEETSTREAMNEXT_VERSION} ( https://github.com/FlorentLM/BeetstreamNext )'}
+
+    response = requests.get(endpoint, headers=headers)
+
+    return response.json() if response.ok else {}
+
+
+def query_lastfm(query: str, type: str, method: str = 'info', mbid=True):
+    if not app.config['lastfm_api_key']:
+        return {}
+
+    query_lastfm = query.replace(' ', '+')
+    endpoint = 'http://ws.audioscrobbler.com/2.0/'
+
+    params = {
+        'format': 'json',
+        'method': f'{type}.get{method.title()}',
+        'api_key': app.config['lastfm_api_key'],
+        }
+
+    if mbid:
+        params['mbid'] = query
+    elif query_lastfm and type != 'user':
+        params[type] = query_lastfm
+
+
+    headers = {'User-Agent': f'BeetstreamNext/{BEETSTREAMNEXT_VERSION} ( https://github.com/FlorentLM/BeetstreamNext )'}
+    response = requests.get(endpoint, headers=headers, params=params)
+
+    return response.json() if response.ok else {}
+
+
+def trim_text(text, char_limit=300):
+    if len(text) <= char_limit:
+        return text
+
+    snippet = text[:char_limit]
+    period_index = text.find(".", char_limit)
+
+    if period_index != -1:
+        snippet = text[:period_index + 1]
+
+    return snippet
